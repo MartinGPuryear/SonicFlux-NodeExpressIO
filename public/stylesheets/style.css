@@ -1,0 +1,30 @@
+/*  SonicFlux Node.js server - style.css
+
+    This file defines styles for the simple index.ejs client, used
+    only for diagnostic purposes.  As such, any styling is minimal.
+*/
+
+body
+{
+  font-family: sans-serif;
+}
+
+h3, span
+{
+  color: blue;
+}
+
+h3
+{
+  margin: 12px;
+}
+
+#live-results
+{
+  display: block;
+}
+
+#final-results, #next-round-players
+{
+  display: none;
+}

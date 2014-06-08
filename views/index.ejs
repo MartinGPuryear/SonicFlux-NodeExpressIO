@@ -1,0 +1,286 @@
+<!DOCTYPE HTML>
+<html lang='en-US'>
+
+<!--    
+      SonicFlux Node.js server - index.ejs
+
+      This file implements a simple client to test the Node.js server
+      in the absence of the production Rails client and server.
+      As such, it is used for NodeJS diagnostic purposes only.
+
+      It presents basic prompts to input the Tag and Difficulty Level.
+      It then increments the point total for each mouse click.  In
+      doing so, it exercises all the various msgs that the Node server
+      expects to receive and send.
+ -->
+
+<head>
+  <meta charset='UTF-8' />
+  <meta http-equiv='X-UA-Compatible' content='IE=edge' />
+  <meta name='description' content='SonicFlux Node client' />
+  <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+  <meta name='author' content='Martin Puryear' />
+
+  <link rel='stylesheet' type='text/css' href='/stylesheets/bootstrap.min.css' />
+  <link rel='stylesheet' type='text/css' href='/stylesheets/style.css' />
+
+  <title><%= title %></title>
+
+  <script type='text/javascript' src='/javascripts/jquery.min.js'></script>
+  <script type='text/javascript' src='/javascripts/bootstrap.min.js'></script>
+  <script type='text/javascript' src='/socket.io/socket.io.js'></script>
+
+  <script type='text/javascript'>
+  
+    var namestr;
+    var my_points = 0;
+    var player_list = [];
+
+    var io = io.connect(  'http://localhost:6789' 
+                         , { 'force new connection': true, 'sync disconnect on unload': true }
+                       ); 
+
+    //  Upon document ready, request the Tag and Difficulty Level. EMIT: 'client_ready'
+    function initialConnect()
+    {
+      nameStr = prompt('Your name:','');     
+      diff_lvl = prompt('Difficulty level (0-3)?', '');
+
+      user = {player_tag: nameStr, difficulty_level: diff_lvl};
+
+      if (nameStr != 'stop')
+      {
+        io.emit('client_ready', {profile: user});
+        console.log('EMIT: client_ready');
+      }
+      else
+      {
+        console.log("STOP-ing so we don't get into infinite loop....")
+      }
+    }
+
+    //  Upon 'client_confirmed', display the successfully joined room.
+    function updateRoomIndicator(room)
+    {
+
+      $('#room-indicator').html('Room ' + room);
+    }
+
+    //  Upon 'play_timer_update' or 'lobby_timer_update', update Time Remaining
+    function updateCountdownBar(secsRemaining)
+    {
+      var timeStr = '' + ('0' + parseInt(secsRemaining / 60)).slice(-1) + ':' + ('00' + (secsRemaining % 60)).slice(-2);
+      $('#countdown-bar').html(timeStr);
+    }
+
+    //  Upon 'play_timer_update', update the scoreboard
+    function updatePlayboard(players)
+    {
+        $('#live-leader-table-body').html('');
+
+        for (var index = 0; index < players.length; index++) 
+        {
+          var gamerStr = '<tr><td>' + players[index].player_tag + '</td><td>' + players[index].points + '</td></tr>';
+          $('#live-leader-table-body').append(gamerStr);
+        }
+    }
+
+    //  Upon 'room_round_results', update the final score board
+    function updateFinalScores(players)
+    {
+        console.log('updateFinalScores: scores = ', players);
+        $('#final-leader-table-body').html('');
+
+        for (var index = 0; index < players.length; index++)
+        {
+          var gamerStr = '<tr><td>' + players[index].player_tag + '</td><td>' + players[index].points + '</td></tr>';
+          $('#final-leader-table-body').append(gamerStr);
+        }
+    }
+
+    //  Upon a change in our player list, update the on-screen player list.
+    function displayPlayerList()
+    {
+      console.log("displayPlayerList(): player_list", player_list);
+      $('#next-round-table-body').html('');
+
+      for (var index = 0; index < player_list.length; index++)
+      {
+        var gamerStr = '<tr><td>' + player_list[index] + '</td></tr>';
+        $('#next-round-table-body').append(gamerStr);
+      }
+    }
+
+    //  Present a simple client to exercise each Node msg, for diagnostics
+    $(document).ready(function ()
+    {
+      initialConnect();
+
+      //  Upon click, EMIT: 'player_scored' with an incremented running counter.
+      $(document).click(function ()
+        {
+          my_points++;
+          io.emit('player_scored', {points: my_points});
+          console.log('EMIT: player_scored');
+        });
+
+      //  Upon 'error_client_ready', try again to connect to the Node server.
+      io.on('error_client_ready', function(errorMsg)
+        {
+          console.log('RECEIVED: error_client_ready (' + errorMsg.error_str + ')');
+          initialConnect();
+        });
+
+      //  Upon 'client_confirmed', display our confirmed room in the UI.
+      io.on('client_confirmed', function(clientRecord)
+        {
+          console.log('RECEIVED: client_confirmed --' +
+                      ' Tag:' + clientRecord.player_tag +
+                      ' Points:' + clientRecord.points +
+                      ' Diff lvl:' + clientRecord.diff_lvl +
+                      ' Incomplete round:' + clientRecord.incomplete_round);
+
+          updateRoomIndicator(clientRecord.diff_lvl);
+        });
+
+      //  Upon 'gamer_entered_room', add player to our list & update UI.
+      io.on('gamer_entered_room', function(public_player)
+        {
+          console.log('RECEIVED: gamer_entered_room: ' + public_player + ' --' +
+                      ' Tag:' + public_player.player_tag +
+                      ' Points:' + public_player.points);
+
+          player_list.push(public_player.player_tag);
+          displayPlayerList();
+        });
+
+      //  Upon 'gamers_already_in_room', add players to our list & update UI.
+      io.on('gamers_already_in_room', function(data)
+        {
+          console.log('RECEIVED: gamers_already_in_room --' + data.leaders);
+          for (index in data.leaders)
+          {
+            player_list.push(data.leaders[index].player_tag);
+          }
+          displayPlayerList();
+        });
+
+      //  Upon 'play_timer_update', update Time Remaining and the scoreboard.
+      io.on('play_timer_update', function(tick_info)
+        {
+          console.log('RECEIVED: play_timer_update - ', tick_info);
+          
+          updateCountdownBar(tick_info['time_remaining']);
+          updatePlayboard(tick_info['leaders'])
+        });
+
+      //  Upon 'lobby_timer_update', update (lobby) Time Remaining.
+      io.on('lobby_timer_update', function(secs_left)
+        {
+          console.log('RECEIVED: lobby_timer_update - ', secs_left);
+          updateCountdownBar(secs_left);
+        });
+
+      //  Upon 'round_started', reset the point counter, clear Time Remaining.
+      io.on('round_started', function(lengthOfPlay)
+        {
+          $('#lobby-time').html('');
+          console.log('RECEIVED: round_started:', lengthOfPlay);
+          my_points = 0;
+
+          $('#final-results').css("display", "none");
+          $('#next-round-players').css("display", "none");
+          $('#live-results').css("display", "block");
+        });
+
+      //  Upon 'question_start', just post a message in the console.
+      io.on('question_start', function()
+        {
+          console.log('RECEIVED: question_start');
+        });
+
+      //  Upon 'round_ended', note that round ended, EMIT: 'request_final_score'.
+      io.on('round_ended', function(lengthOfLobby)
+        {
+          io.emit('request_final_score');
+          $('#lobby-time').html('Lobby time!');
+          console.log('RECEIVED: round_ended:', lengthOfLobby);
+
+          $('#live-results').css("display", "none");
+          $('#next-round-players').css("display", "block");
+        });
+
+      //  Upon 'room_round_results', update the (final) scoreboard. 
+      io.on('room_round_results', function(results)
+        {
+          $('#final-results').css("display", "block");
+          console.log('RECEIVED: room_round_results - ', results);
+          updateFinalScores(results)
+        });
+
+      //  Upon 'final_round_score', just post a message in the console.
+      io.on('final_round_score', function(score)
+        {
+          console.log('RECEIVED: final_round_score ' + score.points + ' round_complete:' + score.round_complete);
+        });
+
+      //  Upon 'gamer_exited_room', remove player from our list & update UI.
+      io.on('gamer_exited_room', function(msg)
+        {
+          console.log('RECEIVED: gamer_exited_room -- ' + msg.player_tag)
+
+          var index_to_delete = player_list.indexOf(msg.player_tag);
+          if (index_to_delete > -1)
+          {
+            player_list.splice(index_to_delete, 1);
+            displayPlayerList();
+          }
+        });
+		});
+
+	</script>
+</head>
+
+<body class='container-fluid'>
+
+  <h3 class='text-center'>Sonic Node</h3>
+  <h4 class='text-center'>
+    <span id='room-indicator'></span>
+    <span id='lobby-time'></span>
+  </h4>
+
+  <div class='col-xs-6'>
+
+    <div id='final-results'>
+      <div>Final Results For This Round:</div>
+
+      <table id='final-leader-table' class='table table-hover table-striped'>
+        <thead><th>Gamer</th><th>Score</th></thead>
+        <tbody id='final-leader-table-body'></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <div class='col-xs-6'>
+
+    <div>Time Remaining: <span id='countdown-bar'></span></div>
+
+    <div id='live-results'>
+      <table id='live-leader-table' class='table table-hover table-striped'>
+        <thead><th>Gamer</th><th>Score</th></thead>
+        <tbody id='live-leader-table-body'></tbody>
+      </table>
+    </div>
+
+    <div id='next-round-players'>
+      <table id='next-round-table' class='table table-hover table-striped'>
+        <thead><th>Gamers for Next Round</th></thead>
+        <tbody id='next-round-table-body'></tbody>
+      </table>
+    </div>
+
+  </div>
+
+</body>
+</html>
